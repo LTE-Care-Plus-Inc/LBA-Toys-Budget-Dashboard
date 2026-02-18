@@ -10,6 +10,24 @@ from dateutil.relativedelta import relativedelta
 # =====================================================
 # PAGE CONFIG
 # =====================================================
+
+# ---- Simple password gate ----
+if "auth_ok" not in st.session_state:
+    st.session_state["auth_ok"] = False
+
+if not st.session_state["auth_ok"]:
+    st.title("🔐 Login")
+
+    pw = st.text_input("Password", type="password")
+    if st.button("Enter"):
+        if pw == st.secrets["APP_PASSWORD"]:
+            st.session_state["auth_ok"] = True
+            st.rerun()
+        else:
+            st.error("Wrong password")
+
+    st.stop()
+
 st.set_page_config(page_title="Toys Budget Dashboard", layout="wide")
 st.title("🎁 Toys Budget Dashboard")
 st.caption("Each Client Receives $25 Every 6 Months (Reset Model)")
