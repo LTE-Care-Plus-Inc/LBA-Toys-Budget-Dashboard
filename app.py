@@ -8,27 +8,40 @@ from google.oauth2.service_account import Credentials
 from dateutil.relativedelta import relativedelta
 
 # =====================================================
-# PAGE CONFIG
+# PAGE CONFIG (MUST BE FIRST STREAMLIT CALL)
 # =====================================================
+st.set_page_config(page_title="Toys Budget Dashboard", layout="wide")
 
-# ---- Simple password gate ----
+# =====================================================
+# SIMPLE PASSWORD GATE (CRASH-PROOF)s
+# =====================================================
 if "auth_ok" not in st.session_state:
     st.session_state["auth_ok"] = False
 
+APP_PASSWORD = st.secrets.get("APP_PASSWORD")  # <-- safe (won't KeyError)
+
+if APP_PASSWORD is None:
+    st.error("APP_PASSWORD is not set in Streamlit Secrets. Add it to secrets.toml / Cloud Secrets.")
+    st.stop()
+
 if not st.session_state["auth_ok"]:
     st.title("🔐 Login")
-
     pw = st.text_input("Password", type="password")
-    if st.button("Enter"):
-        if pw == st.secrets["APP_PASSWORD"]:
-            st.session_state["auth_ok"] = True
-            st.rerun()
-        else:
-            st.error("Wrong password")
+
+    col_a, col_b = st.columns([1, 3])
+    with col_a:
+        if st.button("Enter"):
+            if pw == APP_PASSWORD:
+                st.session_state["auth_ok"] = True
+                st.rerun()
+            else:
+                st.error("Wrong password")
 
     st.stop()
 
-st.set_page_config(page_title="Toys Budget Dashboard", layout="wide")
+# =====================================================
+# APP HEADER
+# =====================================================
 st.title("🎁 Toys Budget Dashboard")
 st.caption("Each Client Receives $25 Every 6 Months (Reset Model)")
 
@@ -42,7 +55,7 @@ try:
     CACHE_TTL = int(st.secrets.get("CACHE_TTL_SECONDS", 60))
     SERVICE_ACCOUNT_B64 = st.secrets["GOOGLE_SERVICE_ACCOUNT_B64"]
 except Exception:
-    st.error("Secrets configuration missing or malformed.")
+    st.error("Secrets configuration missing or malformed (SHEET_ID / GOOGLE_SERVICE_ACCOUNT_B64 / etc).")
     st.stop()
 
 # =====================================================
@@ -156,11 +169,9 @@ def build_summary(df_all: pd.DataFrame) -> pd.DataFrame:
             reset_date = last_purchase + relativedelta(months=6)
 
             if today >= reset_date:
-                # budget resets
                 purchased_cycle = 0.0
                 remaining = BUDGET
             else:
-                # current cycle purchases: last 6 months relative to last purchase date
                 cycle_start = last_purchase - relativedelta(months=6)
                 purchases_in_cycle = purchases[purchases["Timestamp_dt"] >= cycle_start]
                 purchased_cycle = float(purchases_in_cycle["Amount"].sum())
@@ -168,9 +179,7 @@ def build_summary(df_all: pd.DataFrame) -> pd.DataFrame:
 
         pending_total = float(pending["Amount"].sum())
 
-        # ===========================
         # ACTION STATUS LOGIC
-        # ===========================
         if pending_total > 0:
             if pending_total > remaining:
                 action_status = "Over Budget — Pending"
@@ -216,19 +225,18 @@ except Exception as e:
 # =====================================================
 # KPI LOGIC (FINANCIAL / HISTORICAL — INCLUDE INACTIVE)
 # =====================================================
-# Total Purchased: sum of ALL rows with Purchased=TRUE (even if client became inactive later)
 total_purchased = float(df_all[df_all["Purchased_bool"] == True]["Amount"].sum())
-
-# Total Pending: sum of ALL rows with Purchased=FALSE (even if client became inactive later)
 total_pending = float(df_all[df_all["Purchased_bool"] == False]["Amount"].sum())
-
-# Clients Not Eligible: count of ACTIVE clients that are Not Eligible
 clients_not_eligible = int((summary["Action Status"] == "Not Eligible — Wait 6 Months").sum())
 
 # =====================================================
-# SIDEBAR FILTER
+# SIDEBAR (FILTERS + LOGOUT)
 # =====================================================
 st.sidebar.header("Filters")
+
+if st.sidebar.button("Logout"):
+    st.session_state["auth_ok"] = False
+    st.rerun()
 
 statuses = [
     "Eligible",
@@ -238,19 +246,10 @@ statuses = [
     "Not Eligible — Wait 6 Months"
 ]
 
-selected_status = st.sidebar.multiselect(
-    "Action Status",
-    statuses,
-    default=statuses
-)
-
+selected_status = st.sidebar.multiselect("Action Status", statuses, default=statuses)
 filtered = summary[summary["Action Status"].isin(selected_status)].copy()
 
-selected_client = st.sidebar.selectbox(
-    "Client",
-    ["(All)"] + sorted(filtered["Client"].unique().tolist())
-)
-
+selected_client = st.sidebar.selectbox("Client", ["(All)"] + sorted(filtered["Client"].unique().tolist()))
 if selected_client != "(All)":
     filtered = filtered[filtered["Client"] == selected_client].copy()
 
